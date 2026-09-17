@@ -1,0 +1,48 @@
+#!/bin/sh
+# pewterdesk pre-push hook — runs the same checks as .github/workflows/ci.yml,
+# in the same order, so CI failures surface here instead of ten minutes later.
+#
+# Bypass with `git push --no-verify`.
+
+set -u
+
+RED=''
+GREEN=''
+RESET=''
+if [ -t 2 ]; then
+	RED=$(printf '\033[31m')
+	GREEN=$(printf '\033[32m')
+	RESET=$(printf '\033[0m')
+fi
+
+# Branch deletions (`git push --delete`) have an all-zero local sha and nothing
+# to check. If every ref on stdin is a deletion, there is no work to do.
+has_work=0
+while read -r _local_ref local_sha _remote_ref _remote_sha; do
+	case "$local_sha" in
+		'' | *[!0]*) has_work=1 ;;
+	esac
+done
+[ "$has_work" -eq 0 ] && exit 0
+
+run() {
+	name="$1"
+	shift
+	printf 'pre-push: %s…\n' "$name" >&2
+	if ! "$@" >/tmp/pewterdesk-prepush.$$ 2>&1; then
+		printf '%spre-push: %s failed — push aborted.%s\n' "$RED" "$name" "$RESET" >&2
+		tail -40 /tmp/pewterdesk-prepush.$$ >&2
+		rm -f /tmp/pewterdesk-prepush.$$
+		printf '\nBypass with --no-verify if you are certain.\n' >&2
+		exit 1
+	fi
+	rm -f /tmp/pewterdesk-prepush.$$
+}
+
+run lint      pnpm run lint
+run typecheck pnpm run typecheck
+run test      pnpm run test
+run build     pnpm run build
+
+printf '%spre-push: all checks passed.%s\n' "$GREEN" "$RESET" >&2
+exit 0

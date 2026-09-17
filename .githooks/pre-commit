@@ -1,0 +1,111 @@
+#!/bin/sh
+# pewterdesk pre-commit hook.
+#
+#   1. scans staged changes for key material and other secrets
+#   2. typechecks, but only when TypeScript is actually staged
+#
+# Bypass with `git commit --no-verify` when you genuinely need to. See the
+# "Git hooks" section of README.md.
+
+set -u
+
+RED=''
+YELLOW=''
+RESET=''
+if [ -t 2 ]; then
+	RED=$(printf '\033[31m')
+	YELLOW=$(printf '\033[33m')
+	RESET=$(printf '\033[0m')
+fi
+
+fail() {
+	printf '%spre-commit: %s%s\n' "$RED" "$1" "$RESET" >&2
+}
+
+staged_files=$(git diff --cached --name-only --diff-filter=ACM)
+[ -z "$staged_files" ] && exit 0
+
+problems=0
+
+# ---------------------------------------------------------------------------
+# 1. secrets
+#
+# This repo turns private keys into signed exchange actions. Keys are supposed
+# to come from the OS keychain via the Tauri layer and never touch disk, so
+# anything key-shaped reaching the index is a bug worth stopping at the door.
+# ---------------------------------------------------------------------------
+
+# Committed .env files. .env.example / .env.sample are the documented,
+# secret-free templates and stay allowed.
+env_files=$(printf '%s\n' "$staged_files" \
+	| grep -E '(^|/)\.env' \
+	| grep -Ev '\.(example|sample|template)$' || true)
+if [ -n "$env_files" ]; then
+	fail "refusing to commit .env file(s):"
+	printf '  %s\n' $env_files >&2
+	printf '  .env is gitignored for a reason — put non-secret config in .env.example.\n' >&2
+	problems=$((problems + 1))
+fi
+
+# Added lines only: we care about what this commit introduces, not what a
+# rename or a context line happens to drag along.
+added=$(git diff --cached -U0 --diff-filter=ACM | grep -E '^\+' | grep -Ev '^\+\+\+' || true)
+
+scan() {
+	pattern="$1"
+	label="$2"
+	# -e is required: several patterns start with '-' and would otherwise be
+	# parsed as grep options.
+	hits=$(printf '%s\n' "$added" | grep -nEi -e "$pattern" || true)
+	if [ -n "$hits" ]; then
+		fail "$label"
+		printf '%s\n' "$hits" | head -5 | sed 's/^/  /' >&2
+		problems=$((problems + 1))
+	fi
+}
+
+scan '-----BEGIN [A-Z ]*PRIVATE KEY-----' 'PEM private key block in staged changes'
+scan 'npm_[A-Za-z0-9]{36}' 'npm access token in staged changes'
+scan '(AKIA|ASIA)[0-9A-Z]{16}' 'AWS access key id in staged changes'
+scan 'gh[pousr]_[A-Za-z0-9]{36}' 'GitHub token in staged changes'
+# Deliberately limited to *quoted literals*. Matching bare expressions too
+# would flag legitimate code like `const privateKey = await keychain.get()`,
+# and a hook that cries wolf is a hook someone turns off.
+scan '(private[_-]?key|secret[_-]?key|mnemonic|seed[_-]?phrase|passphrase)[[:space:]]*[:=][[:space:]]*['"'"'"][^'"'"'"]{8,}' \
+	'hardcoded key/mnemonic literal in staged changes'
+
+# A 32-byte hex string is the shape of an EVM private key. It is also the shape
+# of a tx hash, a block hash and a bytes32 — all of which legitimately show up
+# in a trading codebase. Treated as a warning, not a block.
+hex_hits=$(printf '%s\n' "$added" | grep -nE '0x[0-9a-fA-F]{64}([^0-9a-fA-F]|$)' || true)
+if [ -n "$hex_hits" ]; then
+	printf '%spre-commit: 32-byte hex string(s) staged — private key, or just a tx hash?%s\n' \
+		"$YELLOW" "$RESET" >&2
+	printf '%s\n' "$hex_hits" | head -5 | sed 's/^/  /' >&2
+	printf '  Not blocking. Check it before you push.\n' >&2
+fi
+
+# ---------------------------------------------------------------------------
+# 2. typecheck
+#
+# Skipped entirely for docs/config-only commits so they stay instant.
+# ---------------------------------------------------------------------------
+if printf '%s\n' "$staged_files" | grep -qE '\.(ts|tsx|mts|cts)$'; then
+	printf 'pre-commit: typechecking…\n' >&2
+	if ! pnpm run typecheck >/tmp/pewterdesk-typecheck.$$ 2>&1; then
+		fail 'typecheck failed:'
+		tail -30 /tmp/pewterdesk-typecheck.$$ >&2
+		rm -f /tmp/pewterdesk-typecheck.$$
+		problems=$((problems + 1))
+	else
+		rm -f /tmp/pewterdesk-typecheck.$$
+	fi
+fi
+
+if [ "$problems" -gt 0 ]; then
+	printf '\n%spre-commit: %s check(s) failed — commit aborted.%s\n' "$RED" "$problems" "$RESET" >&2
+	printf 'Bypass with --no-verify if you are certain.\n' >&2
+	exit 1
+fi
+
+exit 0

@@ -1,0 +1,57 @@
+#!/bin/sh
+# pewterdesk commit-msg hook — enforces Conventional Commits.
+#
+#   <type>[optional scope][!]: <subject>
+#
+# e.g.  feat(exchange-hyperliquid): add EIP-712 order signing
+#       fix: stop refetching the book on every tick
+#       chore!: drop node 20 support
+#
+# Bypass with `git commit --no-verify`.
+
+set -u
+
+msg_file="$1"
+
+RED=''
+RESET=''
+if [ -t 2 ]; then
+	RED=$(printf '\033[31m')
+	RESET=$(printf '\033[0m')
+fi
+
+# First line that is neither blank nor a scissors/comment line.
+subject=$(grep -vE '^[[:space:]]*#' "$msg_file" | grep -vE '^[[:space:]]*$' | head -1)
+
+if [ -z "$subject" ]; then
+	printf '%scommit-msg: empty commit message.%s\n' "$RED" "$RESET" >&2
+	exit 1
+fi
+
+# Git's own machinery — merges, reverts, and rebase fixups — is exempt.
+case "$subject" in
+	Merge\ *|Revert\ *|fixup!\ *|squash!\ *|amend!\ *)
+		exit 0
+		;;
+esac
+
+types='feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert'
+
+if ! printf '%s' "$subject" | grep -qE "^($types)(\([a-z0-9._/-]+\))?!?: .+"; then
+	printf '%scommit-msg: not a Conventional Commit subject.%s\n' "$RED" "$RESET" >&2
+	printf '\n  got:      %s\n' "$subject" >&2
+	printf '  expected: <type>[(scope)][!]: <subject>\n' >&2
+	printf '  types:    %s\n' "$(printf '%s' "$types" | tr '|' ' ')" >&2
+	printf '\n  e.g. feat(exchange-hyperliquid): add EIP-712 order signing\n' >&2
+	exit 1
+fi
+
+# Long subjects get truncated in logs, PR titles and `git log --oneline`.
+length=$(printf '%s' "$subject" | wc -c | tr -d ' ')
+if [ "$length" -gt 72 ]; then
+	printf '%scommit-msg: subject is %s chars (max 72).%s\n' "$RED" "$length" "$RESET" >&2
+	printf '  Put the detail in the body, after a blank line.\n' >&2
+	exit 1
+fi
+
+exit 0
