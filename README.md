@@ -131,6 +131,33 @@ Run from the repo root; each fans out across every package with `pnpm -r`.
 | `pnpm lint` | run each package's `eslint src` |
 | `pnpm desktop:dev` | serve the desktop frontend in a browser (Vite only, no native window) |
 
+## Git hooks
+
+`pnpm install` enables them automatically (the root `prepare` script points
+`core.hooksPath` at [.githooks/](.githooks)). They're plain POSIX shell, no
+npm dependency — deliberate, in a repo that will handle signing keys. Toggle
+manually with `pnpm hooks:install` / `pnpm hooks:uninstall`.
+
+| Hook | Runs |
+| --- | --- |
+| `pre-commit` | secret scan of staged changes, then `pnpm typecheck` — the typecheck is skipped unless a `.ts`/`.tsx` file is staged, so docs-only commits stay instant |
+| `commit-msg` | Conventional Commits (`feat:`, `fix:`, `chore:` …), subject capped at 72 chars; merges, reverts and `fixup!` are exempt |
+| `pre-push` | lint → typecheck → test → build, the same four steps as [ci.yml](.github/workflows/ci.yml), so CI failures surface before the push |
+
+The secret scan blocks committed `.env` files (`.env.example` is fine), PEM
+private key blocks, npm/GitHub/AWS tokens, and quoted literals assigned to
+things named `privateKey`, `mnemonic`, `seedPhrase` and friends. A bare 32-byte
+hex string is **warned** about rather than blocked, because in a trading
+codebase that shape is just as likely to be a tx hash as a key.
+
+It matches quoted literals only, so ordinary code like
+`const privateKey = await keychain.get(...)` doesn't trip it. The flip side:
+a test fixture with a throwaway key *will* be blocked. That's the intended
+trade — use `--no-verify` for that commit and say why in the message.
+
+Every hook can be bypassed with `--no-verify`. None of them are a substitute
+for CI, which runs on a clean checkout.
+
 ## Security-sensitive code
 
 `packages/exchange-hyperliquid/src/signing.ts` (not yet written) will be the
