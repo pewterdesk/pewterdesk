@@ -1,12 +1,17 @@
-// Blank shell: loads the frontend (apps/desktop's Vite build) into a native
-// window. No custom Tauri commands yet — those come with the first real
-// feature that needs Rust-side capability (OS keychain access for signing
-// keys, first and foremost). See CLAUDE.md's security-sensitive-code section
-// before adding anything there.
+// Native shell for the PewterDesk frontend. The only Rust-side capability so
+// far is the OS-keychain bridge in `keychain`
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
+mod keychain;
 
 fn main() {
     tauri::Builder::default()
+        .invoke_handler(tauri::generate_handler![
+            keychain::store_secret,
+            keychain::get_secret,
+            keychain::has_secret,
+            keychain::delete_secret,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running pewterdesk");
 }

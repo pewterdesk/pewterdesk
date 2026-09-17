@@ -6,6 +6,5 @@
     "jsx": "react-jsx",
     "composite": false
   },
-  "include": ["src"],
-  "references": [{ "path": "../../packages/core" }, { "path": "../../packages/ui" }]
+  "include": ["src"]
 }
