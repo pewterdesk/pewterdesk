@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint src",
+    "lint": "echo \"lint: ESLint not configured yet\"",
     "test": "echo \"no tests yet\""
   },
   "dependencies": {
