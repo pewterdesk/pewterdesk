@@ -24,5 +24,11 @@ updates:
       - "dependencies"
       - "ci"
 
-  # NOTE: a "cargo" entry for apps/desktop/src-tauri belongs here once that
-  # Cargo.toml actually exists — adding it before then has nothing to scan.
+  # apps/desktop/src-tauri's Cargo.toml now exists (Tauri shell scaffolded)
+  - package-ecosystem: "cargo"
+    directory: "/apps/desktop/src-tauri"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
+      - "rust"
